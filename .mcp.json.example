@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "context-watcher": {
+      "command": "python",
+      "args": [
+        "-m", "context_watcher.mcp_server",
+        "--watch-root", "."
+      ],
+      "cwd": "/absolute/path/to/your/project"
+    }
+  }
+}

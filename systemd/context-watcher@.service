@@ -1,0 +1,43 @@
+# context-watcher per-project systemd user service (SSE/HTTP transport)
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp context-watcher@.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#
+# Enable and start for a project (instance name = URL-encoded project path):
+#   systemctl --user enable --now "context-watcher@$(systemd-escape /home/you/myproject)"
+#
+# The server listens on 127.0.0.1:8000 by default.
+# Configure your MCP client to connect to: http://127.0.0.1:8000/sse
+#
+# To use a different port per project, override via a drop-in:
+#   systemctl --user edit "context-watcher@$(systemd-escape /home/you/myproject)"
+#   # Add:
+#   # [Service]
+#   # Environment=PORT=8001
+
+[Unit]
+Description=context-watcher MCP server (%I)
+After=network.target
+
+[Service]
+Type=simple
+Environment=PORT=8000
+Environment=HOST=127.0.0.1
+# %I is the URL-decoded instance name (the project path)
+ExecStart=python -m context_watcher.mcp_server \
+    --watch-root %I \
+    --transport sse \
+    --host ${HOST} \
+    --port ${PORT}
+WorkingDirectory=%I
+Restart=on-failure
+RestartSec=5
+
+# Keep logs accessible via journalctl --user -u context-watcher@...
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

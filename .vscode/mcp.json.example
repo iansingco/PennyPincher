@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "context-watcher": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "-m", "context_watcher.mcp_server",
+        "--watch-root", "${workspaceFolder}"
+      ]
+    }
+  }
+}

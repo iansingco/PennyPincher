@@ -40,7 +40,7 @@ from .watcher import FileWatcher
 logger = logging.getLogger(__name__)
 
 
-def _build_server(config: Config) -> FastMCP:
+def _build_server(config: Config, host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
     # ---------------------------------------------------------------------------
     # Component wiring
     # ---------------------------------------------------------------------------
@@ -72,6 +72,8 @@ def _build_server(config: Config) -> FastMCP:
             "a fresh context fetch is needed."
         ),
         lifespan=_lifespan,
+        host=host,
+        port=port,
     )
 
     # ---------------------------------------------------------------------------
@@ -208,6 +210,23 @@ def main() -> None:
         help="Maximum tokens in assembled context (default: 100,000)",
     )
     parser.add_argument(
+        "--transport",
+        default="stdio",
+        choices=["stdio", "sse", "streamable-http"],
+        help="MCP transport (default: stdio). Use 'sse' or 'streamable-http' for service mode.",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind when using sse/streamable-http transport (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind when using sse/streamable-http transport (default: 8000)",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -224,8 +243,8 @@ def main() -> None:
     if args.token_budget is not None:
         config.token_budget = args.token_budget
 
-    mcp = _build_server(config)
-    mcp.run()
+    mcp = _build_server(config, host=args.host, port=args.port)
+    mcp.run(transport=args.transport)
 
 
 if __name__ == "__main__":
