@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -48,10 +49,20 @@ class StabilityRanker:
         self._save()
 
     def record_stable(self, path: Path) -> None:
-        """Ensure the file has a score entry; don't update timestamp."""
+        """Ensure the file has a score entry.
+
+        For new files (not in the persisted sidecar) the stability score is
+        seeded from the file's mtime — older files rank higher immediately
+        rather than all starting at the same score.
+        """
         key = str(path)
         if key not in self._scores:
-            self._scores[key] = FileScore(path=key, last_changed=0)
+            try:
+                mtime = path.stat().st_mtime
+                # last_changed = mtime so stability_score = time.time() - mtime
+                self._scores[key] = FileScore(path=key, last_changed=mtime)
+            except OSError:
+                self._scores[key] = FileScore(path=key, last_changed=0)
 
     def mark_stable(self, path: Path) -> None:
         """Manually pin a file to the top of the stable prefix (last_changed=0)."""
@@ -66,13 +77,18 @@ class StabilityRanker:
     # ------------------------------------------------------------------
 
     def rank(self, paths: list[Path]) -> list[Path]:
-        """Return paths sorted most-stable → least-stable."""
-        def score(p: Path) -> float:
-            s = self._scores.get(str(p))
-            # Unknown files (not yet scored) are treated as maximally stable
-            return s.stability_score if s else float("inf")
+        """Return paths sorted most-stable → least-stable.
 
-        return sorted(paths, key=score, reverse=True)
+        Tie-breaking on path string for deterministic ordering — required so the
+        assembled context is byte-identical across calls when nothing has changed,
+        which is essential for prefix cache hits.
+        """
+        def sort_key(p: Path) -> tuple[float, str]:
+            s = self._scores.get(str(p))
+            score = s.stability_score if s else float("inf")
+            return (-score, str(p))  # negate score so highest sorts first
+
+        return sorted(paths, key=sort_key)
 
     def get_score(self, path: Path) -> float | None:
         s = self._scores.get(str(path))
@@ -95,8 +111,15 @@ class StabilityRanker:
             logger.warning("Could not load stability scores: %s", exc)
 
     def _save(self) -> None:
+        """Write atomically via temp file + os.replace to avoid corrupt state."""
+        tmp = self._state_file.with_suffix(".tmp")
         try:
-            with open(self._state_file, "w") as f:
+            with open(tmp, "w") as f:
                 json.dump({k: asdict(v) for k, v in self._scores.items()}, f, indent=2)
+            os.replace(tmp, self._state_file)
         except OSError as exc:
             logger.warning("Could not save stability scores: %s", exc)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass

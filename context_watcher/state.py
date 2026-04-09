@@ -13,6 +13,7 @@ import difflib
 import fnmatch
 import hashlib
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -75,19 +76,55 @@ class FileStateManager:
     # ------------------------------------------------------------------
 
     def index_directory(self, root: Path) -> int:
-        """Walk root recursively, index every non-ignored file. Returns file count."""
+        """Walk root recursively, index every eligible file. Returns file count.
+
+        Uses os.walk with in-place directory pruning so ignored directories
+        (e.g. .git, node_modules) are never descended into — critical for
+        performance on large repos.
+        """
         count = 0
-        for path in root.rglob("*"):
-            if path.is_file() and not self._is_ignored(path):
+        for dirpath, dirnames, filenames in os.walk(str(root)):
+            # Prune ignored directories in-place to prevent descent
+            dirnames[:] = [
+                d for d in dirnames
+                if not self._is_ignored(Path(dirpath) / d)
+            ]
+            for filename in filenames:
+                abs_path = Path(dirpath) / filename
+                if self._is_ignored(abs_path):
+                    continue
                 try:
-                    self.index_file(path)
-                    count += 1
+                    if self.index_file(abs_path):
+                        count += 1
                 except (OSError, UnicodeDecodeError) as exc:
-                    logger.debug("Skipping %s: %s", path, exc)
+                    logger.debug("Skipping %s: %s", abs_path, exc)
         return count
 
-    def index_file(self, path: Path) -> None:
-        """Add or refresh a file into the stable index."""
+    def index_file(self, path: Path) -> bool:
+        """Add or refresh a file into the stable index.
+
+        Returns True if the file was indexed, False if skipped (too large / binary).
+        """
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return False
+
+        if size > self._config.max_file_size_bytes:
+            logger.debug("Skipping %s: exceeds max_file_size_bytes (%d)", path, size)
+            return False
+
+        # Binary detection: check first 8 KB for null bytes, then read as text
+        try:
+            with open(path, "rb") as f:
+                probe = f.read(8192)
+            if b"\x00" in probe:
+                logger.debug("Skipping %s: binary file", path)
+                return False
+        except OSError as exc:
+            logger.debug("Skipping %s: %s", path, exc)
+            return False
+
         content = path.read_text(errors="replace")
         self._states[str(path)] = FileState(
             path=path,
@@ -95,6 +132,7 @@ class FileStateManager:
             clean_content=content,
             dirty_content=None,
         )
+        return True
 
     # ------------------------------------------------------------------
     # Mutation (called by watcher)

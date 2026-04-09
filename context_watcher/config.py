@@ -37,6 +37,8 @@ class Config:
     diff_threshold: float = 0.20
     # Sidecar file for persisting stability scores
     state_file: str = ".context_watcher_state.json"
+    # Skip files larger than this (bytes); default 1 MiB
+    max_file_size_bytes: int = 1_048_576
     # Optional log file (None = stdout)
     log_file: str | None = None
     # Glob patterns to ignore during indexing/watching
